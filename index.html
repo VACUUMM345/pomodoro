@@ -161,7 +161,12 @@
 <script>
 (() => {
   const LABELS = { focus: 'Время сосредоточиться', short: 'Короткий отдых', long: 'Длинный отдых' };
-  const today = new Date().toISOString().slice(0, 10);
+  // Local calendar date (YYYY-MM-DD); toISOString() would use UTC and roll over at the wrong hour
+  const localDate = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const today = localDate();
 
   const load = (key, fallback) => {
     try { const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; } catch { return fallback; }
@@ -254,6 +259,8 @@
     clearInterval(tick);
     chime();
     if (mode === 'focus') {
+      // The page may stay open past midnight — start a new day's count
+      if (stats.date !== localDate()) stats = { date: localDate(), count: 0 };
       stats.count++;
       save('pomo.stats', stats);
       renderStats();
