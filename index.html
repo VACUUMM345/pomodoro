@@ -183,6 +183,7 @@
   let remaining = total;
   let endAt = null;   // timestamp when running, null when paused
   let tick = null;
+  let finishTimer = null;
 
   const $ = (id) => document.getElementById(id);
   const bar = document.querySelector('.bar');
@@ -239,13 +240,19 @@
     if (endAt) return;
     endAt = Date.now() + remaining * 1000;
     tick = setInterval(update, 250);
+    // In a background tab Chrome slows the interval to once a minute; a one-shot timeout still fires on time
+    finishTimer = setTimeout(update, remaining * 1000 + 50);
     render();
+  }
+  function stopTimers() {
+    clearInterval(tick);
+    clearTimeout(finishTimer);
   }
   function pause() {
     if (!endAt) return;
     remaining = Math.max(0, (endAt - Date.now()) / 1000);
     endAt = null;
-    clearInterval(tick);
+    stopTimers();
     render();
   }
   function update() {
@@ -256,7 +263,7 @@
 
   function finish() {
     endAt = null;
-    clearInterval(tick);
+    stopTimers();
     chime();
     if (mode === 'focus') {
       // The page may stay open past midnight — start a new day's count
@@ -274,9 +281,20 @@
     }
   }
 
+  // One shared AudioContext, created/resumed on a user click: browsers keep a context
+  // created without a gesture muted, and a new context per chime is never released
+  let audio = null;
+  function unlockAudio() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+    } catch {}
+  }
+
   function chime() {
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      unlockAudio();
+      const ctx = audio;
       [523.25, 659.25, 783.99].forEach((f, i) => {
         const o = ctx.createOscillator(), g = ctx.createGain();
         o.type = 'sine'; o.frequency.value = f;
@@ -299,6 +317,7 @@
   // Events
   $('toggle').onclick = () => {
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+    unlockAudio();
     endAt ? pause() : start();
   };
   $('reset').onclick = () => setMode(mode);
@@ -327,8 +346,12 @@
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.target.matches('input')) return;
-    if (e.code === 'Space') { e.preventDefault(); $('toggle').click(); }
+    // Leave browser shortcuts alone: Ctrl+S / Ctrl+R must not skip or reset the session
+    if (e.target.matches('input') || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Space') e.preventDefault();
+    // A held key auto-repeats; act only on the first press
+    if (e.repeat) return;
+    if (e.code === 'Space') $('toggle').click();
     else if (e.code === 'KeyR') $('reset').click();
     else if (e.code === 'KeyS') $('skip').click();
   });
